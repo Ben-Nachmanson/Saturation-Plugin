@@ -274,12 +274,14 @@ private:
         const int channels   = buffer.getNumChannels();
         const int numSamples = buffer.getNumSamples();
 
-        // Map 0..1 noiseAmount to a dB range: -60dB (barely audible) to -20dB (obvious)
-        const float noiseGainDb = -60.0f + noiseAmount * 40.0f;
+        // Map 0..1 noiseAmount to a dB range: -60dB (silent) to -30dB (present but under the mix)
+        // The NOISE knob is the absolute ceiling — signal modulation only shapes
+        // the dynamics, it never pushes the noise louder than the knob setting.
+        const float noiseGainDb = -60.0f + noiseAmount * 30.0f;
         const float noiseGain   = juce::Decibels::decibelsToGain (noiseGainDb);
 
-        constexpr float floorRatio  = 0.20f;   // Small constant noise floor
-        constexpr float signalRatio = 0.80f;    // Primarily signal-dependent
+        constexpr float floorRatio  = 0.15f;   // Small constant noise floor
+        constexpr float signalRatio = 0.85f;   // Primarily signal-dependent
 
         const float a = noiseHPAlpha;
 
@@ -311,7 +313,9 @@ private:
                 hpX = rawNoise;
 
                 // Scale noise: mostly signal-dependent, small constant floor
-                const float noiseLevel = noiseGain * (floorRatio + signalRatio * env);
+                // Clamp envelope to 1.0 so the knob is always the ceiling
+                const float clampedEnv = juce::jmin (env, 1.0f);
+                const float noiseLevel = noiseGain * (floorRatio + signalRatio * clampedEnv);
 
                 data[i] += filteredNoise * noiseLevel;
             }
