@@ -5,11 +5,11 @@
 //==============================================================================
 namespace Theme
 {
-    // Wood
-    const juce::Colour woodDark    { 0xFF2E1A0E };   // Dark walnut base
-    const juce::Colour woodMid     { 0xFF3D2415 };   // Mid walnut
-    const juce::Colour woodLight   { 0xFF4E3020 };   // Lighter grain highlights
-    const juce::Colour woodGrain   { 0xFF241208 };   // Dark grain lines
+    // Wood — warm walnut, brighter and richer
+    const juce::Colour woodDark    { 0xFF4A2E18 };   // Walnut base
+    const juce::Colour woodMid     { 0xFF5E3A22 };   // Mid walnut
+    const juce::Colour woodLight   { 0xFF7A4E30 };   // Lighter grain highlights
+    const juce::Colour woodGrain   { 0xFF3A2010 };   // Dark grain lines
 
     // Matte black faceplate
     const juce::Colour panelBlack  { 0xFF1A1A1A };   // Matte black
@@ -419,9 +419,9 @@ void WarmSaturationEditor::resized()
     const int labelH    = static_cast<int> (H * 0.045f);
     const int textBoxH  = static_cast<int> (H * 0.04f);
 
-    // === DRIVE: large knob, upper-center ===
-    const int driveTop   = static_cast<int> (H * 0.18f);
-    const int driveSize  = static_cast<int> (H * 0.40f);
+    // === DRIVE: large knob, upper-center (below title/subtitle) ===
+    const int driveTop   = static_cast<int> (H * 0.25f);
+    const int driveSize  = static_cast<int> (H * 0.35f);
 
     driveKnob.setBounds (panelCX - driveSize / 2, driveTop, driveSize, driveSize);
     driveKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false,
