@@ -1,0 +1,122 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package DMG
+        run: |
+          chmod +x packaging/create-dmg.sh
+          ./packaging/create-dmg.sh build WarmSaturation-macOS
+
+      - name: Upload macOS artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: WarmSaturation-macOS.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package ZIP
+        shell: pwsh
+        run: |
+          $artefacts = "build/WarmSaturation_artefacts/Release"
+          $staging = "WarmSaturation-Windows"
+          New-Item -ItemType Directory -Force -Path $staging
+          Copy-Item -Recurse "$artefacts/VST3/Warm Saturation.vst3" "$staging/"
+          Copy-Item -Recurse "$artefacts/Standalone/Warm Saturation.exe" "$staging/" -ErrorAction SilentlyContinue
+          @"
+          Warm Saturation - Installation
+          ==============================
+
+          VST3:
+            Copy the "Warm Saturation.vst3" folder to:
+            C:\Program Files\Common Files\VST3\
+
+          Standalone:
+            Run "Warm Saturation.exe" directly.
+          "@ | Set-Content "$staging/README.txt"
+          Compress-Archive -Path "$staging/*" -DestinationPath "WarmSaturation-Windows.zip"
+
+      - name: Upload Windows artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: WarmSaturation-Windows.zip
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+
+      - name: Download Windows artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Warm Saturation ${{ github.ref_name }}
+          body: |
+            ## Warm Saturation ${{ github.ref_name }}
+
+            Analog tube saturation plugin with tilt EQ tone control and a physical hardware-inspired interface.
+
+            ### Downloads
+
+            | Platform | File | Contents |
+            |----------|------|----------|
+            | **macOS** | `WarmSaturation-macOS.dmg` | VST3 + AU + Standalone (Universal Binary) |
+            | **Windows** | `WarmSaturation-Windows.zip` | VST3 + Standalone |
+
+            ### macOS Installation
+            1. Open the DMG
+            2. Copy `Warm Saturation.vst3` to `~/Library/Audio/Plug-Ins/VST3/`
+            3. Copy `Warm Saturation.component` to `~/Library/Audio/Plug-Ins/Components/`
+            4. On first launch, macOS may block the plugin — right-click and select "Open", or allow it in System Preferences > Privacy & Security
+
+            ### Windows Installation
+            1. Extract the ZIP
+            2. Copy the `Warm Saturation.vst3` folder to `C:\Program Files\Common Files\VST3\`
+
+          files: |
+            WarmSaturation-macOS.dmg
+            WarmSaturation-Windows.zip
+          draft: false
+          prerelease: false

@@ -28,3 +28,7 @@ Thumbs.db
 *.vst3
 *.component
 *.aaxplugin
+
+# Release artefacts
+*.dmg
+*.zip
