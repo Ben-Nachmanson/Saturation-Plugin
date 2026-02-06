@@ -4,8 +4,6 @@
 #include "PluginProcessor.h"
 
 //==============================================================================
-// Custom LookAndFeel for a warm, minimal aesthetic
-//==============================================================================
 class WarmLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -33,39 +31,35 @@ private:
     WarmSaturationProcessor& processorRef;
     WarmLookAndFeel warmLookAndFeel;
 
-    // Knobs
+    // Knobs (4 total: drive big center, tone/output/mix smaller below)
     juce::Slider driveKnob;
+    juce::Slider toneKnob;
     juce::Slider outputKnob;
     juce::Slider mixKnob;
-    juce::Slider toneKnob;
-    juce::Slider noiseKnob;
-    juce::Slider noiseHPKnob;
 
-    // Knob labels
+    // Labels
     juce::Label driveLabel;
+    juce::Label toneLabel;
     juce::Label outputLabel;
     juce::Label mixLabel;
-    juce::Label toneLabel;
-    juce::Label noiseLabel;
-    juce::Label noiseHPLabel;
 
-    // Section labels
-    juce::Label outputSectionLabel;
-    juce::Label noiseSectionLabel;
-
-    // Parameter attachments
+    // Attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> toneAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> toneAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseHPAttachment;
 
-    // Corner resizer for drag-to-resize
+    // Resizer
     std::unique_ptr<juce::ResizableCornerComponent> cornerResizer;
     juce::ComponentBoundsConstrainer constrainer;
 
+    // Procedural textures (cached as images for performance)
+    juce::Image woodTexture;
+    juce::Image panelTexture;
+
     void setupKnob (juce::Slider& knob, juce::Label& label, const juce::String& text);
+    void generateWoodTexture (int width, int height);
+    void generatePanelTexture (int width, int height);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WarmSaturationEditor)
 };

@@ -4,61 +4,87 @@
 #include <cmath>
 
 //==============================================================================
-// Pink noise generator using the Voss-McCartney algorithm.
+// Tilt EQ — single-knob tone shaping
 //
-// White noise has equal energy per Hz, so it sounds harsh and "digital."
-// Pink noise (1/f) has equal energy per octave — 3 dB/octave rolloff —
-// which matches how we perceive frequency and sounds much more natural,
-// like the hiss/hum from real analog circuits.
+// A first-order shelving filter that pivots around ~800Hz.
+// When the control is centered (0.0), the filter is flat/bypassed.
+// Turning left (-1.0) cuts highs and boosts lows (warm, dark).
+// Turning right (+1.0) boosts highs and cuts lows (bright, present).
 //
-// This implementation layers multiple random sources that update at
-// different rates (powers of 2), then sums them. The result approximates
-// a 1/f spectral slope without needing an IIR pinking filter.
+// This is how most analog "tone" controls work — a single knob that
+// shifts the spectral balance. Always audible at every position.
+//
+// Implementation: first-order shelf using a biquad with coefficients
+// derived from the tilt amount and pivot frequency.
 //==============================================================================
-class PinkNoiseGenerator
+class TiltEQ
 {
 public:
-    PinkNoiseGenerator() { reset(); }
+    TiltEQ() = default;
+
+    void prepare (double newSampleRate, int numChannels)
+    {
+        sampleRate = newSampleRate;
+        x1.resize (static_cast<size_t> (numChannels), 0.0f);
+        y1.resize (static_cast<size_t> (numChannels), 0.0f);
+        updateCoefficients();
+    }
 
     void reset()
     {
-        for (int i = 0; i < numRows; ++i)
-            rows[i] = 0.0f;
-
-        runningSum = 0.0f;
-        counter = 0;
+        std::fill (x1.begin(), x1.end(), 0.0f);
+        std::fill (y1.begin(), y1.end(), 0.0f);
     }
 
-    float nextSample()
+    // Set tilt amount: -1.0 (dark) to +1.0 (bright), 0.0 = flat
+    void setTilt (float newTilt)
     {
-        // Find the lowest set bit that changed — determines which row to update
-        int lastCounter = counter;
-        ++counter;
-        int diff = lastCounter ^ counter;
-
-        for (int i = 0; i < numRows; ++i)
+        if (std::abs (newTilt - tilt) > 0.001f)
         {
-            if (diff & (1 << i))
-            {
-                runningSum -= rows[i];
-                rows[i] = random.nextFloat() * 2.0f - 1.0f;
-                runningSum += rows[i];
-            }
+            tilt = newTilt;
+            updateCoefficients();
         }
+    }
 
-        // Add a white noise component for the highest frequencies
-        float white = random.nextFloat() * 2.0f - 1.0f;
-
-        // Normalize: numRows contributors + 1 white noise
-        return (runningSum + white) / static_cast<float> (numRows + 1);
+    float processSample (int channel, float input)
+    {
+        const auto ch = static_cast<size_t> (channel);
+        float output = a0 * input + a1 * x1[ch] - b1 * y1[ch];
+        x1[ch] = input;
+        y1[ch] = output;
+        return output;
     }
 
 private:
-    static constexpr int numRows = 12;
-    float rows[numRows] {};
-    float runningSum = 0.0f;
-    int counter = 0;
-    juce::Random random;
+    void updateCoefficients()
+    {
+        // Pivot frequency ~800Hz
+        constexpr float pivotHz = 800.0f;
+        const float wc = 2.0f * juce::MathConstants<float>::pi * pivotHz
+                         / static_cast<float> (sampleRate);
+
+        // Map tilt to gain: ±6dB range
+        const float gainDb = tilt * 6.0f;
+        const float gain = std::pow (10.0f, gainDb / 20.0f);
+
+        // Compute first-order shelf coefficients
+        // Using matched analog prototype: H(s) = (s + wc*g) / (s + wc/g)
+        // Bilinear transform gives us the digital coefficients
+        const float g = gain;
+        const float tanW = std::tan (wc * 0.5f);
+        const float t = tanW / g;
+
+        a0 = (tanW * g + 1.0f) / (t + 1.0f);
+        a1 = (tanW * g - 1.0f) / (t + 1.0f);
+        b1 = (t - 1.0f) / (t + 1.0f);
+    }
+
+    double sampleRate = 44100.0;
+    float tilt = 0.0f;
+    float a0 = 1.0f, a1 = 0.0f, b1 = 0.0f;
+
+    std::vector<float> x1;  // x[n-1] per channel
+    std::vector<float> y1;  // y[n-1] per channel
 };
 
 //==============================================================================
@@ -87,28 +113,8 @@ public:
         postGain.prepare (spec);
         postGain.setRampDurationSeconds (0.02);
 
-        // Tone filter: single-pole low-pass to tame upper harmonics
-        toneFilter.prepare (spec);
-        updateToneFilter();
-
-        // Envelope follower state (per channel)
-        envelopeState.resize (static_cast<size_t> (numChannels), 0.0f);
-
-        // Compute envelope follower coefficients
-        // Attack: very fast (0.5ms) to catch transients tightly
-        // Release: moderate (50ms) so noise breathes with the signal naturally
-        envelopeAttack  = std::exp (-1.0f / static_cast<float> (sampleRate * 0.0005));
-        envelopeRelease = std::exp (-1.0f / static_cast<float> (sampleRate * 0.050));
-
-        // Initialize noise high-pass filter state (one per channel)
-        noiseHPState.resize (static_cast<size_t> (numChannels), 0.0f);
-        noiseHPPrevInput.resize (static_cast<size_t> (numChannels), 0.0f);
-        updateNoiseHPCoefficients();
-
-        // One pink noise generator per channel for uncorrelated stereo noise
-        pinkNoise.resize (static_cast<size_t> (numChannels));
-        for (auto& gen : pinkNoise)
-            gen.reset();
+        // Tilt EQ for tone shaping
+        tiltEQ.prepare (sampleRate, numChannels);
 
         // Dry buffer for mix blending
         dryBuffer.setSize (numChannels,
@@ -119,18 +125,7 @@ public:
     {
         preGain.reset();
         postGain.reset();
-        toneFilter.reset();
-        for (auto& env : envelopeState)
-            env = 0.0f;
-
-        for (auto& s : noiseHPState)
-            s = 0.0f;
-
-        for (auto& s : noiseHPPrevInput)
-            s = 0.0f;
-
-        for (auto& gen : pinkNoise)
-            gen.reset();
+        tiltEQ.reset();
     }
 
     // Set drive amount in dB (0 to 40)
@@ -151,25 +146,10 @@ public:
         mix = newMix;
     }
 
-    // Set tone filter cutoff in Hz (1000 to 20000)
-    void setTone (float frequencyHz)
+    // Set tone tilt: -1.0 (dark) to +1.0 (bright), 0.0 = neutral
+    void setTone (float toneValue)
     {
-        toneFrequency = frequencyHz;
-        updateToneFilter();
-    }
-
-    // Set analog noise amount (0.0 to 1.0)
-    void setNoise (float newNoise)
-    {
-        noiseAmount = newNoise;
-    }
-
-    // Set noise high-pass cutoff in Hz (20 to 1000)
-    // Filters the noise ONLY — removes low-end rumble without touching audio
-    void setNoiseHP (float frequencyHz)
-    {
-        noiseHPFrequency = frequencyHz;
-        updateNoiseHPCoefficients();
+        tiltEQ.setTilt (toneValue);
     }
 
     void process (juce::AudioBuffer<float>& buffer)
@@ -188,24 +168,16 @@ public:
         // Apply drive (pre-gain)
         preGain.process (context);
 
-        // Apply tube-style waveshaping sample by sample
+        // Apply tube-style waveshaping + tilt EQ per sample
         for (int ch = 0; ch < channels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
             for (int i = 0; i < numSamples; ++i)
             {
                 data[i] = tubeWaveshape (data[i]);
+                data[i] = tiltEQ.processSample (ch, data[i]);
             }
         }
-
-        // Apply tone filter (tame harsh upper harmonics)
-        juce::dsp::AudioBlock<float> filteredBlock (buffer);
-        juce::dsp::ProcessContextReplacing<float> filterContext (filteredBlock);
-        toneFilter.process (filterContext);
-
-        // Add analog-style noise (after saturation, before output gain)
-        if (noiseAmount > 0.0f)
-            addAnalogNoise (buffer);
 
         // Apply output gain
         juce::dsp::AudioBlock<float> outputBlock (buffer);
@@ -231,143 +203,22 @@ public:
 private:
     //==========================================================================
     // Tube waveshaping transfer function
-    //
-    // Combines tanh soft-clipping with an asymmetric squared term:
-    //   f(x) = tanh(x) + bias * x^2 / (1 + |x|)
-    //
-    // The x^2 term is always positive regardless of input sign, creating
-    // asymmetry in the transfer curve. This asymmetry generates even-order
-    // harmonics (2nd, 4th) which are the signature of tube warmth.
-    //
-    // The denominator (1 + |x|) prevents the squared term from blowing up
-    // at high drive levels.
     //==========================================================================
     static float tubeWaveshape (float x)
     {
-        constexpr float bias = 0.15f;  // Controls even-harmonic amount
+        constexpr float bias = 0.15f;
         const float saturated = std::tanh (x);
         const float evenHarmonics = bias * (x * x) / (1.0f + std::abs (x));
         return saturated + evenHarmonics;
     }
 
-    //==========================================================================
-    // Analog noise injection
-    //
-    // Real analog circuits have noise that interacts with the signal:
-    //   - A small constant noise floor (thermal noise, always present)
-    //   - Signal-dependent noise (tubes generate more noise when driven
-    //     harder — the hotter the signal, the more hiss and crackle)
-    //
-    // The noise is primarily signal-dependent (80%) with a small constant
-    // floor (20%), so it breathes dynamically with the music. The envelope
-    // follower has fast attack (0.5ms) to catch transients and moderate
-    // release (50ms) so the noise decays naturally.
-    //
-    // A per-sample first-order high-pass filter is applied to the noise
-    // BEFORE it's mixed into the audio, removing low-end rumble without
-    // touching the signal at all.
-    //
-    // The noise level maps from 0-100% to roughly -60dB to -20dB.
-    //==========================================================================
-    void addAnalogNoise (juce::AudioBuffer<float>& buffer)
-    {
-        const int channels   = buffer.getNumChannels();
-        const int numSamples = buffer.getNumSamples();
-
-        // Map 0..1 noiseAmount to a dB range: -60dB (silent) to -30dB (present but under the mix)
-        // The NOISE knob is the absolute ceiling — signal modulation only shapes
-        // the dynamics, it never pushes the noise louder than the knob setting.
-        const float noiseGainDb = -60.0f + noiseAmount * 30.0f;
-        const float noiseGain   = juce::Decibels::decibelsToGain (noiseGainDb);
-
-        constexpr float floorRatio  = 0.15f;   // Small constant noise floor
-        constexpr float signalRatio = 0.85f;   // Primarily signal-dependent
-
-        const float a = noiseHPAlpha;
-
-        for (int ch = 0; ch < channels; ++ch)
-        {
-            auto* data      = buffer.getWritePointer (ch);
-            const auto idx  = static_cast<size_t> (ch);
-            float env       = envelopeState[idx];
-            float hpY       = noiseHPState[idx];       // y[n-1]
-            float hpX       = noiseHPPrevInput[idx];    // x[n-1]
-
-            for (int i = 0; i < numSamples; ++i)
-            {
-                // Envelope follower: track signal level tightly
-                const float absSignal = std::abs (data[i]);
-                if (absSignal > env)
-                    env = envelopeAttack * env + (1.0f - envelopeAttack) * absSignal;
-                else
-                    env = envelopeRelease * env + (1.0f - envelopeRelease) * absSignal;
-
-                // Generate pink noise sample (raw, unfiltered)
-                const float rawNoise = pinkNoise[idx].nextSample();
-
-                // First-order high-pass filter on noise only:
-                //   y[n] = alpha * (y[n-1] + x[n] - x[n-1])
-                // Removes low-end rumble below the cutoff frequency
-                const float filteredNoise = a * (hpY + rawNoise - hpX);
-                hpY = filteredNoise;
-                hpX = rawNoise;
-
-                // Scale noise: mostly signal-dependent, small constant floor
-                // Clamp envelope to 1.0 so the knob is always the ceiling
-                const float clampedEnv = juce::jmin (env, 1.0f);
-                const float noiseLevel = noiseGain * (floorRatio + signalRatio * clampedEnv);
-
-                data[i] += filteredNoise * noiseLevel;
-            }
-
-            envelopeState[idx]     = env;
-            noiseHPState[idx]      = hpY;
-            noiseHPPrevInput[idx]  = hpX;
-        }
-    }
-
-    void updateToneFilter()
-    {
-        if (sampleRate > 0.0)
-        {
-            *toneFilter.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass (
-                sampleRate, toneFrequency, 0.707f);
-        }
-    }
-
-    void updateNoiseHPCoefficients()
-    {
-        if (sampleRate > 0.0)
-        {
-            // First-order high-pass coefficient
-            // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
-            const double rc = 1.0 / (2.0 * juce::MathConstants<double>::pi * static_cast<double> (noiseHPFrequency));
-            const double dt = 1.0 / sampleRate;
-            noiseHPAlpha = static_cast<float> (rc / (rc + dt));
-        }
-    }
-
     double sampleRate = 44100.0;
     int numChannels = 2;
     float mix = 1.0f;
-    float toneFrequency = 12000.0f;
-    float noiseAmount = 0.0f;
-    float noiseHPFrequency = 80.0f;
-    float noiseHPAlpha = 0.0f;
-
-    float envelopeAttack  = 0.0f;
-    float envelopeRelease = 0.0f;
 
     juce::dsp::Gain<float> preGain;
     juce::dsp::Gain<float> postGain;
-
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
-                                    juce::dsp::IIR::Coefficients<float>> toneFilter;
-
-    std::vector<float> envelopeState;
-    std::vector<float> noiseHPState;      // y[n-1] per channel for noise high-pass
-    std::vector<float> noiseHPPrevInput;  // x[n-1] per channel for noise high-pass
-    std::vector<PinkNoiseGenerator> pinkNoise;
+    TiltEQ tiltEQ;
 
     juce::AudioBuffer<float> dryBuffer;
 };

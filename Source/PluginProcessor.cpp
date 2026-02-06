@@ -48,39 +48,22 @@ WarmSaturationProcessor::createParameterLayout()
         [] (float value, int) { return juce::String (static_cast<int> (value)) + "%"; },
         nullptr));
 
+    // Tone: tilt EQ from -100 (dark) to +100 (bright), 0 = neutral
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "tone", 1 },
         "Tone",
-        juce::NormalisableRange<float> (1000.0f, 20000.0f, 1.0f, 0.3f),
-        12000.0f,
+        juce::NormalisableRange<float> (-100.0f, 100.0f, 0.1f),
+        0.0f,
         juce::String(),
         juce::AudioProcessorParameter::genericParameter,
         [] (float value, int)
         {
-            if (value >= 1000.0f)
-                return juce::String (value / 1000.0f, 1) + " kHz";
-            return juce::String (static_cast<int> (value)) + " Hz";
+            if (value < -0.5f)
+                return juce::String ("DARK ") + juce::String (static_cast<int> (-value));
+            if (value > 0.5f)
+                return juce::String ("BRIGHT ") + juce::String (static_cast<int> (value));
+            return juce::String ("NEUTRAL");
         },
-        nullptr));
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "noise", 1 },
-        "Noise",
-        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
-        0.0f,
-        juce::String(),
-        juce::AudioProcessorParameter::genericParameter,
-        [] (float value, int) { return juce::String (static_cast<int> (value)) + "%"; },
-        nullptr));
-
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "noiseHP", 1 },
-        "Noise HP",
-        juce::NormalisableRange<float> (20.0f, 1000.0f, 1.0f, 0.3f),
-        80.0f,
-        juce::String(),
-        juce::AudioProcessorParameter::genericParameter,
-        [] (float value, int) { return juce::String (static_cast<int> (value)) + " Hz"; },
         nullptr));
 
     return { params.begin(), params.end() };
@@ -104,12 +87,10 @@ void WarmSaturationProcessor::releaseResources()
 
 bool WarmSaturationProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Support mono and stereo only
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
         && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 
-    // Input must match output
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
 
@@ -124,7 +105,6 @@ void WarmSaturationProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-    // Clear any extra output channels
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
@@ -132,17 +112,13 @@ void WarmSaturationProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     float driveVal  = apvts.getRawParameterValue ("drive")->load();
     float outputVal = apvts.getRawParameterValue ("output")->load();
     float mixVal    = apvts.getRawParameterValue ("mix")->load() / 100.0f;
-    float toneVal   = apvts.getRawParameterValue ("tone")->load();
-    float noiseVal   = apvts.getRawParameterValue ("noise")->load() / 100.0f;
-    float noiseHPVal = apvts.getRawParameterValue ("noiseHP")->load();
+    float toneVal   = apvts.getRawParameterValue ("tone")->load() / 100.0f;  // Map to -1..+1
 
     // Update DSP parameters
     saturation.setDrive (driveVal);
     saturation.setOutput (outputVal);
     saturation.setMix (mixVal);
     saturation.setTone (toneVal);
-    saturation.setNoise (noiseVal);
-    saturation.setNoiseHP (noiseHPVal);
 
     // Process audio
     saturation.process (buffer);
@@ -186,7 +162,6 @@ void WarmSaturationProcessor::setStateInformation (const void* data, int sizeInB
 }
 
 //==============================================================================
-// This creates the plugin instance
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new WarmSaturationProcessor();
