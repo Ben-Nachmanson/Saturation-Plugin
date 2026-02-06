@@ -39,6 +39,7 @@ private:
     juce::Slider mixKnob;
     juce::Slider toneKnob;
     juce::Slider noiseKnob;
+    juce::Slider noiseHPKnob;
 
     // Labels
     juce::Label driveLabel;
@@ -46,6 +47,7 @@ private:
     juce::Label mixLabel;
     juce::Label toneLabel;
     juce::Label noiseLabel;
+    juce::Label noiseHPLabel;
 
     // Parameter attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
@@ -53,6 +55,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> toneAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseHPAttachment;
 
     // Corner resizer for drag-to-resize
     std::unique_ptr<juce::ResizableCornerComponent> cornerResizer;

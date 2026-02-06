@@ -95,10 +95,15 @@ public:
         envelopeState.resize (static_cast<size_t> (numChannels), 0.0f);
 
         // Compute envelope follower coefficients
-        // Attack: fast (1ms) to track transients
-        // Release: slow (100ms) to smooth out
-        envelopeAttack  = std::exp (-1.0f / static_cast<float> (sampleRate * 0.001));
-        envelopeRelease = std::exp (-1.0f / static_cast<float> (sampleRate * 0.100));
+        // Attack: very fast (0.5ms) to catch transients tightly
+        // Release: moderate (50ms) so noise breathes with the signal naturally
+        envelopeAttack  = std::exp (-1.0f / static_cast<float> (sampleRate * 0.0005));
+        envelopeRelease = std::exp (-1.0f / static_cast<float> (sampleRate * 0.050));
+
+        // Initialize noise high-pass filter state (one per channel)
+        noiseHPState.resize (static_cast<size_t> (numChannels), 0.0f);
+        noiseHPPrevInput.resize (static_cast<size_t> (numChannels), 0.0f);
+        updateNoiseHPCoefficients();
 
         // One pink noise generator per channel for uncorrelated stereo noise
         pinkNoise.resize (static_cast<size_t> (numChannels));
@@ -117,6 +122,12 @@ public:
         toneFilter.reset();
         for (auto& env : envelopeState)
             env = 0.0f;
+
+        for (auto& s : noiseHPState)
+            s = 0.0f;
+
+        for (auto& s : noiseHPPrevInput)
+            s = 0.0f;
 
         for (auto& gen : pinkNoise)
             gen.reset();
@@ -151,6 +162,14 @@ public:
     void setNoise (float newNoise)
     {
         noiseAmount = newNoise;
+    }
+
+    // Set noise high-pass cutoff in Hz (20 to 1000)
+    // Filters the noise ONLY — removes low-end rumble without touching audio
+    void setNoiseHP (float frequencyHz)
+    {
+        noiseHPFrequency = frequencyHz;
+        updateNoiseHPCoefficients();
     }
 
     void process (juce::AudioBuffer<float>& buffer)
@@ -235,16 +254,20 @@ private:
     // Analog noise injection
     //
     // Real analog circuits have noise that interacts with the signal:
-    //   - A constant noise floor (thermal noise from resistors, always present)
-    //   - Signal-dependent noise (tubes/transistors generate more noise when
-    //     driven harder — the hotter the signal, the more noise)
+    //   - A small constant noise floor (thermal noise, always present)
+    //   - Signal-dependent noise (tubes generate more noise when driven
+    //     harder — the hotter the signal, the more hiss and crackle)
     //
-    // We blend 70% constant floor + 30% signal-envelope-following noise,
-    // then shape it with pink noise (1/f spectrum) and a gentle low-pass
-    // to remove harsh digital-sounding high frequencies.
+    // The noise is primarily signal-dependent (80%) with a small constant
+    // floor (20%), so it breathes dynamically with the music. The envelope
+    // follower has fast attack (0.5ms) to catch transients and moderate
+    // release (50ms) so the noise decays naturally.
     //
-    // The noise level maps from 0-100% to roughly -60dB to -20dB,
-    // keeping it subtle even at maximum.
+    // A per-sample first-order high-pass filter is applied to the noise
+    // BEFORE it's mixed into the audio, removing low-end rumble without
+    // touching the signal at all.
+    //
+    // The noise level maps from 0-100% to roughly -60dB to -20dB.
     //==========================================================================
     void addAnalogNoise (juce::AudioBuffer<float>& buffer)
     {
@@ -255,33 +278,47 @@ private:
         const float noiseGainDb = -60.0f + noiseAmount * 40.0f;
         const float noiseGain   = juce::Decibels::decibelsToGain (noiseGainDb);
 
-        constexpr float floorRatio  = 0.7f;   // Constant noise floor portion
-        constexpr float signalRatio = 0.3f;    // Signal-dependent portion
+        constexpr float floorRatio  = 0.20f;   // Small constant noise floor
+        constexpr float signalRatio = 0.80f;    // Primarily signal-dependent
+
+        const float a = noiseHPAlpha;
 
         for (int ch = 0; ch < channels; ++ch)
         {
-            auto* data = buffer.getWritePointer (ch);
-            float env  = envelopeState[static_cast<size_t> (ch)];
+            auto* data      = buffer.getWritePointer (ch);
+            const auto idx  = static_cast<size_t> (ch);
+            float env       = envelopeState[idx];
+            float hpY       = noiseHPState[idx];       // y[n-1]
+            float hpX       = noiseHPPrevInput[idx];    // x[n-1]
 
             for (int i = 0; i < numSamples; ++i)
             {
-                // Envelope follower: track signal level
+                // Envelope follower: track signal level tightly
                 const float absSignal = std::abs (data[i]);
                 if (absSignal > env)
                     env = envelopeAttack * env + (1.0f - envelopeAttack) * absSignal;
                 else
                     env = envelopeRelease * env + (1.0f - envelopeRelease) * absSignal;
 
-                // Generate pink noise sample
-                float noiseSample = pinkNoise[static_cast<size_t> (ch)].nextSample();
+                // Generate pink noise sample (raw, unfiltered)
+                const float rawNoise = pinkNoise[idx].nextSample();
 
-                // Blend constant floor with signal-dependent modulation
-                float noiseLevel = noiseGain * (floorRatio + signalRatio * env);
+                // First-order high-pass filter on noise only:
+                //   y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+                // Removes low-end rumble below the cutoff frequency
+                const float filteredNoise = a * (hpY + rawNoise - hpX);
+                hpY = filteredNoise;
+                hpX = rawNoise;
 
-                data[i] += noiseSample * noiseLevel;
+                // Scale noise: mostly signal-dependent, small constant floor
+                const float noiseLevel = noiseGain * (floorRatio + signalRatio * env);
+
+                data[i] += filteredNoise * noiseLevel;
             }
 
-            envelopeState[static_cast<size_t> (ch)] = env;
+            envelopeState[idx]     = env;
+            noiseHPState[idx]      = hpY;
+            noiseHPPrevInput[idx]  = hpX;
         }
     }
 
@@ -294,11 +331,25 @@ private:
         }
     }
 
+    void updateNoiseHPCoefficients()
+    {
+        if (sampleRate > 0.0)
+        {
+            // First-order high-pass coefficient
+            // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
+            const double rc = 1.0 / (2.0 * juce::MathConstants<double>::pi * static_cast<double> (noiseHPFrequency));
+            const double dt = 1.0 / sampleRate;
+            noiseHPAlpha = static_cast<float> (rc / (rc + dt));
+        }
+    }
+
     double sampleRate = 44100.0;
     int numChannels = 2;
     float mix = 1.0f;
     float toneFrequency = 12000.0f;
     float noiseAmount = 0.0f;
+    float noiseHPFrequency = 80.0f;
+    float noiseHPAlpha = 0.0f;
 
     float envelopeAttack  = 0.0f;
     float envelopeRelease = 0.0f;
@@ -310,6 +361,8 @@ private:
                                     juce::dsp::IIR::Coefficients<float>> toneFilter;
 
     std::vector<float> envelopeState;
+    std::vector<float> noiseHPState;      // y[n-1] per channel for noise high-pass
+    std::vector<float> noiseHPPrevInput;  // x[n-1] per channel for noise high-pass
     std::vector<PinkNoiseGenerator> pinkNoise;
 
     juce::AudioBuffer<float> dryBuffer;

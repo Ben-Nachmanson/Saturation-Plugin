@@ -91,11 +91,11 @@ void WarmLookAndFeel::drawRotarySlider (juce::Graphics& g,
 //==============================================================================
 // WarmSaturationEditor
 //==============================================================================
-static constexpr int defaultWidth  = 500;
+static constexpr int defaultWidth  = 540;
 static constexpr int defaultHeight = 300;
-static constexpr int minWidth      = 375;
+static constexpr int minWidth      = 405;
 static constexpr int minHeight     = 225;
-static constexpr int maxWidth      = 1000;
+static constexpr int maxWidth      = 1080;
 static constexpr int maxHeight     = 600;
 
 WarmSaturationEditor::WarmSaturationEditor (WarmSaturationProcessor& p)
@@ -103,24 +103,27 @@ WarmSaturationEditor::WarmSaturationEditor (WarmSaturationProcessor& p)
 {
     setLookAndFeel (&warmLookAndFeel);
 
-    // Setup all 5 knobs
-    setupKnob (driveKnob,  driveLabel,  "DRIVE");
-    setupKnob (outputKnob, outputLabel, "OUTPUT");
-    setupKnob (mixKnob,    mixLabel,    "MIX");
-    setupKnob (toneKnob,   toneLabel,   "TONE");
-    setupKnob (noiseKnob,  noiseLabel,  "NOISE");
+    // Setup all 6 knobs
+    setupKnob (driveKnob,   driveLabel,   "DRIVE");
+    setupKnob (outputKnob,  outputLabel,  "OUTPUT");
+    setupKnob (mixKnob,     mixLabel,     "MIX");
+    setupKnob (toneKnob,    toneLabel,    "TONE");
+    setupKnob (noiseKnob,   noiseLabel,   "NOISE");
+    setupKnob (noiseHPKnob, noiseHPLabel, "NOISE HP");
 
     // Attach parameters
-    driveAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+    driveAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "drive", driveKnob);
-    outputAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+    outputAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "output", outputKnob);
-    mixAttachment    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+    mixAttachment     = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "mix", mixKnob);
-    toneAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+    toneAttachment    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "tone", toneKnob);
-    noiseAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+    noiseAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "noise", noiseKnob);
+    noiseHPAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processorRef.apvts, "noiseHP", noiseHPKnob);
 
     // Setup resizable corner
     constrainer.setMinimumSize (minWidth, minHeight);
@@ -193,17 +196,18 @@ void WarmSaturationEditor::resized()
     // Bottom padding
     bounds.removeFromBottom (proportionOfHeight (0.05f));
 
-    // Divide remaining space into 5 equal columns
-    const int knobWidth = bounds.getWidth() / 5;
+    // Divide remaining space into 6 equal columns
+    const int knobWidth = bounds.getWidth() / 6;
     const int labelHeight = proportionOfHeight (0.06f);
 
     struct KnobPair { juce::Slider& knob; juce::Label& label; };
     KnobPair knobs[] = {
-        { driveKnob,  driveLabel  },
-        { outputKnob, outputLabel },
-        { mixKnob,    mixLabel    },
-        { toneKnob,   toneLabel   },
-        { noiseKnob,  noiseLabel  }
+        { driveKnob,   driveLabel   },
+        { outputKnob,  outputLabel  },
+        { mixKnob,     mixLabel     },
+        { toneKnob,    toneLabel    },
+        { noiseKnob,   noiseLabel   },
+        { noiseHPKnob, noiseHPLabel }
     };
 
     for (auto& kp : knobs)
