@@ -243,13 +243,13 @@ void WarmSaturationEditor::paint (juce::Graphics& g)
     const float botY       = topZone + midH + h * 0.01f;
     const float halfW      = (w - margin * 3.0f) * 0.5f;
 
-    // Bottom-left section panel (OUTPUT)
-    auto outputPanel = juce::Rectangle<float> (margin, botY, halfW, botH - margin);
-    drawSectionPanel (g, outputPanel.toNearestInt());
-
-    // Bottom-right section panel (NOISE)
-    auto noisePanel = juce::Rectangle<float> (margin * 2.0f + halfW, botY, halfW, botH - margin);
+    // Bottom-left section panel (NOISE)
+    auto noisePanel = juce::Rectangle<float> (margin, botY, halfW, botH - margin);
     drawSectionPanel (g, noisePanel.toNearestInt());
+
+    // Bottom-right section panel (OUTPUT)
+    auto outputPanel = juce::Rectangle<float> (margin * 2.0f + halfW, botY, halfW, botH - margin);
+    drawSectionPanel (g, outputPanel.toNearestInt());
 
     // Footer branding
     g.setColour (Theme::textDim.withAlpha (0.4f));
@@ -311,39 +311,39 @@ void WarmSaturationEditor::resized()
                          smallKnob, labelH);
 
     // ======================================
-    // BOTTOM-LEFT: OUTPUT section (Output + Mix)
+    // BOTTOM-LEFT: NOISE section (Noise + Noise HP)
     // ======================================
     const int secInner    = static_cast<int> (margin * 0.6f);
-    const int olX         = margin;
-    const int olY         = botY;
-    const int olW         = halfW;
+    const int nlX         = margin;
+    const int nlY         = botY;
+    const int nlW         = halfW;
 
-    outputSectionLabel.setBounds (olX, olY + secInner / 2, olW, sectionLblH);
+    noiseSectionLabel.setBounds (nlX, nlY + secInner / 2, nlW, sectionLblH);
 
     const int pairKnob    = static_cast<int> ((botH - sectionLblH - secInner * 2) * 0.85f);
-    const int pairY       = olY + sectionLblH + secInner;
-    const int colW        = olW / 2;
+    const int pairY       = nlY + sectionLblH + secInner;
+    const int colW        = nlW / 2;
 
-    outputKnob.setBounds (olX + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
-    outputKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
-    outputLabel.setBounds (olX, pairY - labelH, colW, labelH);
-
-    mixKnob.setBounds (olX + colW + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
-    mixKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
-    mixLabel.setBounds (olX + colW, pairY - labelH, colW, labelH);
-
-    // ======================================
-    // BOTTOM-RIGHT: NOISE section (Noise + Noise HP)
-    // ======================================
-    const int nrX = margin * 2 + halfW;
-
-    noiseSectionLabel.setBounds (nrX, olY + secInner / 2, halfW, sectionLblH);
-
-    noiseKnob.setBounds (nrX + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
+    noiseKnob.setBounds (nlX + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
     noiseKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
-    noiseLabel.setBounds (nrX, pairY - labelH, colW, labelH);
+    noiseLabel.setBounds (nlX, pairY - labelH, colW, labelH);
 
-    noiseHPKnob.setBounds (nrX + colW + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
+    noiseHPKnob.setBounds (nlX + colW + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
     noiseHPKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
-    noiseHPLabel.setBounds (nrX + colW, pairY - labelH, colW, labelH);
+    noiseHPLabel.setBounds (nlX + colW, pairY - labelH, colW, labelH);
+
+    // ======================================
+    // BOTTOM-RIGHT: OUTPUT section (Output + Mix)
+    // ======================================
+    const int orX = margin * 2 + halfW;
+
+    outputSectionLabel.setBounds (orX, nlY + secInner / 2, halfW, sectionLblH);
+
+    outputKnob.setBounds (orX + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
+    outputKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
+    outputLabel.setBounds (orX, pairY - labelH, colW, labelH);
+
+    mixKnob.setBounds (orX + colW + colW / 2 - pairKnob / 2, pairY, pairKnob, pairKnob);
+    mixKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, pairKnob, textBoxH);
+    mixLabel.setBounds (orX + colW, pairY - labelH, colW, labelH);
 }
