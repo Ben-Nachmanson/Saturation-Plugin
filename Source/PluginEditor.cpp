@@ -91,11 +91,11 @@ void WarmLookAndFeel::drawRotarySlider (juce::Graphics& g,
 //==============================================================================
 // WarmSaturationEditor
 //==============================================================================
-static constexpr int defaultWidth  = 400;
+static constexpr int defaultWidth  = 500;
 static constexpr int defaultHeight = 300;
-static constexpr int minWidth      = 300;
+static constexpr int minWidth      = 375;
 static constexpr int minHeight     = 225;
-static constexpr int maxWidth      = 800;
+static constexpr int maxWidth      = 1000;
 static constexpr int maxHeight     = 600;
 
 WarmSaturationEditor::WarmSaturationEditor (WarmSaturationProcessor& p)
@@ -103,11 +103,12 @@ WarmSaturationEditor::WarmSaturationEditor (WarmSaturationProcessor& p)
 {
     setLookAndFeel (&warmLookAndFeel);
 
-    // Setup all 4 knobs
+    // Setup all 5 knobs
     setupKnob (driveKnob,  driveLabel,  "DRIVE");
     setupKnob (outputKnob, outputLabel, "OUTPUT");
     setupKnob (mixKnob,    mixLabel,    "MIX");
     setupKnob (toneKnob,   toneLabel,   "TONE");
+    setupKnob (noiseKnob,  noiseLabel,  "NOISE");
 
     // Attach parameters
     driveAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -118,6 +119,8 @@ WarmSaturationEditor::WarmSaturationEditor (WarmSaturationProcessor& p)
         processorRef.apvts, "mix", mixKnob);
     toneAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.apvts, "tone", toneKnob);
+    noiseAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processorRef.apvts, "noise", noiseKnob);
 
     // Setup resizable corner
     constrainer.setMinimumSize (minWidth, minHeight);
@@ -190,8 +193,8 @@ void WarmSaturationEditor::resized()
     // Bottom padding
     bounds.removeFromBottom (proportionOfHeight (0.05f));
 
-    // Divide remaining space into 4 equal columns
-    const int knobWidth = bounds.getWidth() / 4;
+    // Divide remaining space into 5 equal columns
+    const int knobWidth = bounds.getWidth() / 5;
     const int labelHeight = proportionOfHeight (0.06f);
 
     struct KnobPair { juce::Slider& knob; juce::Label& label; };
@@ -199,7 +202,8 @@ void WarmSaturationEditor::resized()
         { driveKnob,  driveLabel  },
         { outputKnob, outputLabel },
         { mixKnob,    mixLabel    },
-        { toneKnob,   toneLabel   }
+        { toneKnob,   toneLabel   },
+        { noiseKnob,  noiseLabel  }
     };
 
     for (auto& kp : knobs)

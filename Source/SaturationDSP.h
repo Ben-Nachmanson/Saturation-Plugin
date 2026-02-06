@@ -4,6 +4,64 @@
 #include <cmath>
 
 //==============================================================================
+// Pink noise generator using the Voss-McCartney algorithm.
+//
+// White noise has equal energy per Hz, so it sounds harsh and "digital."
+// Pink noise (1/f) has equal energy per octave — 3 dB/octave rolloff —
+// which matches how we perceive frequency and sounds much more natural,
+// like the hiss/hum from real analog circuits.
+//
+// This implementation layers multiple random sources that update at
+// different rates (powers of 2), then sums them. The result approximates
+// a 1/f spectral slope without needing an IIR pinking filter.
+//==============================================================================
+class PinkNoiseGenerator
+{
+public:
+    PinkNoiseGenerator() { reset(); }
+
+    void reset()
+    {
+        for (int i = 0; i < numRows; ++i)
+            rows[i] = 0.0f;
+
+        runningSum = 0.0f;
+        counter = 0;
+    }
+
+    float nextSample()
+    {
+        // Find the lowest set bit that changed — determines which row to update
+        int lastCounter = counter;
+        ++counter;
+        int diff = lastCounter ^ counter;
+
+        for (int i = 0; i < numRows; ++i)
+        {
+            if (diff & (1 << i))
+            {
+                runningSum -= rows[i];
+                rows[i] = random.nextFloat() * 2.0f - 1.0f;
+                runningSum += rows[i];
+            }
+        }
+
+        // Add a white noise component for the highest frequencies
+        float white = random.nextFloat() * 2.0f - 1.0f;
+
+        // Normalize: numRows contributors + 1 white noise
+        return (runningSum + white) / static_cast<float> (numRows + 1);
+    }
+
+private:
+    static constexpr int numRows = 12;
+    float rows[numRows] {};
+    float runningSum = 0.0f;
+    int counter = 0;
+    juce::Random random;
+};
+
+//==============================================================================
 // Tube-style saturation processor
 //
 // Emulates the asymmetric soft-clipping behavior of vacuum tubes.
@@ -19,6 +77,7 @@ public:
     void prepare (const juce::dsp::ProcessSpec& spec)
     {
         sampleRate = spec.sampleRate;
+        numChannels = static_cast<int> (spec.numChannels);
 
         // Pre-gain (drive)
         preGain.prepare (spec);
@@ -32,8 +91,22 @@ public:
         toneFilter.prepare (spec);
         updateToneFilter();
 
+        // Envelope follower state (per channel)
+        envelopeState.resize (static_cast<size_t> (numChannels), 0.0f);
+
+        // Compute envelope follower coefficients
+        // Attack: fast (1ms) to track transients
+        // Release: slow (100ms) to smooth out
+        envelopeAttack  = std::exp (-1.0f / static_cast<float> (sampleRate * 0.001));
+        envelopeRelease = std::exp (-1.0f / static_cast<float> (sampleRate * 0.100));
+
+        // One pink noise generator per channel for uncorrelated stereo noise
+        pinkNoise.resize (static_cast<size_t> (numChannels));
+        for (auto& gen : pinkNoise)
+            gen.reset();
+
         // Dry buffer for mix blending
-        dryBuffer.setSize (static_cast<int> (spec.numChannels),
+        dryBuffer.setSize (numChannels,
                            static_cast<int> (spec.maximumBlockSize));
     }
 
@@ -42,6 +115,11 @@ public:
         preGain.reset();
         postGain.reset();
         toneFilter.reset();
+        for (auto& env : envelopeState)
+            env = 0.0f;
+
+        for (auto& gen : pinkNoise)
+            gen.reset();
     }
 
     // Set drive amount in dB (0 to 40)
@@ -69,13 +147,19 @@ public:
         updateToneFilter();
     }
 
+    // Set analog noise amount (0.0 to 1.0)
+    void setNoise (float newNoise)
+    {
+        noiseAmount = newNoise;
+    }
+
     void process (juce::AudioBuffer<float>& buffer)
     {
-        const int numChannels = buffer.getNumChannels();
-        const int numSamples  = buffer.getNumSamples();
+        const int channels   = buffer.getNumChannels();
+        const int numSamples = buffer.getNumSamples();
 
         // Save dry signal for mix blending
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < channels; ++ch)
             dryBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
 
         // Wrap buffer in a dsp::AudioBlock
@@ -86,7 +170,7 @@ public:
         preGain.process (context);
 
         // Apply tube-style waveshaping sample by sample
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < channels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
             for (int i = 0; i < numSamples; ++i)
@@ -100,6 +184,10 @@ public:
         juce::dsp::ProcessContextReplacing<float> filterContext (filteredBlock);
         toneFilter.process (filterContext);
 
+        // Add analog-style noise (after saturation, before output gain)
+        if (noiseAmount > 0.0f)
+            addAnalogNoise (buffer);
+
         // Apply output gain
         juce::dsp::AudioBlock<float> outputBlock (buffer);
         juce::dsp::ProcessContextReplacing<float> outputContext (outputBlock);
@@ -108,7 +196,7 @@ public:
         // Dry/wet mix blending
         if (mix < 1.0f)
         {
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < channels; ++ch)
             {
                 auto* wetData = buffer.getWritePointer (ch);
                 const auto* dryData = dryBuffer.getReadPointer (ch);
@@ -143,6 +231,60 @@ private:
         return saturated + evenHarmonics;
     }
 
+    //==========================================================================
+    // Analog noise injection
+    //
+    // Real analog circuits have noise that interacts with the signal:
+    //   - A constant noise floor (thermal noise from resistors, always present)
+    //   - Signal-dependent noise (tubes/transistors generate more noise when
+    //     driven harder — the hotter the signal, the more noise)
+    //
+    // We blend 70% constant floor + 30% signal-envelope-following noise,
+    // then shape it with pink noise (1/f spectrum) and a gentle low-pass
+    // to remove harsh digital-sounding high frequencies.
+    //
+    // The noise level maps from 0-100% to roughly -60dB to -20dB,
+    // keeping it subtle even at maximum.
+    //==========================================================================
+    void addAnalogNoise (juce::AudioBuffer<float>& buffer)
+    {
+        const int channels   = buffer.getNumChannels();
+        const int numSamples = buffer.getNumSamples();
+
+        // Map 0..1 noiseAmount to a dB range: -60dB (barely audible) to -20dB (obvious)
+        const float noiseGainDb = -60.0f + noiseAmount * 40.0f;
+        const float noiseGain   = juce::Decibels::decibelsToGain (noiseGainDb);
+
+        constexpr float floorRatio  = 0.7f;   // Constant noise floor portion
+        constexpr float signalRatio = 0.3f;    // Signal-dependent portion
+
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+            float env  = envelopeState[static_cast<size_t> (ch)];
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                // Envelope follower: track signal level
+                const float absSignal = std::abs (data[i]);
+                if (absSignal > env)
+                    env = envelopeAttack * env + (1.0f - envelopeAttack) * absSignal;
+                else
+                    env = envelopeRelease * env + (1.0f - envelopeRelease) * absSignal;
+
+                // Generate pink noise sample
+                float noiseSample = pinkNoise[static_cast<size_t> (ch)].nextSample();
+
+                // Blend constant floor with signal-dependent modulation
+                float noiseLevel = noiseGain * (floorRatio + signalRatio * env);
+
+                data[i] += noiseSample * noiseLevel;
+            }
+
+            envelopeState[static_cast<size_t> (ch)] = env;
+        }
+    }
+
     void updateToneFilter()
     {
         if (sampleRate > 0.0)
@@ -153,13 +295,22 @@ private:
     }
 
     double sampleRate = 44100.0;
+    int numChannels = 2;
     float mix = 1.0f;
     float toneFrequency = 12000.0f;
+    float noiseAmount = 0.0f;
+
+    float envelopeAttack  = 0.0f;
+    float envelopeRelease = 0.0f;
 
     juce::dsp::Gain<float> preGain;
     juce::dsp::Gain<float> postGain;
+
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
                                     juce::dsp::IIR::Coefficients<float>> toneFilter;
+
+    std::vector<float> envelopeState;
+    std::vector<PinkNoiseGenerator> pinkNoise;
 
     juce::AudioBuffer<float> dryBuffer;
 };

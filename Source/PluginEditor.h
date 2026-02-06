@@ -38,18 +38,21 @@ private:
     juce::Slider outputKnob;
     juce::Slider mixKnob;
     juce::Slider toneKnob;
+    juce::Slider noiseKnob;
 
     // Labels
     juce::Label driveLabel;
     juce::Label outputLabel;
     juce::Label mixLabel;
     juce::Label toneLabel;
+    juce::Label noiseLabel;
 
     // Parameter attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> toneAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> noiseAttachment;
 
     // Corner resizer for drag-to-resize
     std::unique_ptr<juce::ResizableCornerComponent> cornerResizer;

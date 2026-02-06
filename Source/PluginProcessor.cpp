@@ -63,6 +63,16 @@ WarmSaturationProcessor::createParameterLayout()
         },
         nullptr));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "noise", 1 },
+        "Noise",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        0.0f,
+        juce::String(),
+        juce::AudioProcessorParameter::genericParameter,
+        [] (float value, int) { return juce::String (static_cast<int> (value)) + "%"; },
+        nullptr));
+
     return { params.begin(), params.end() };
 }
 
@@ -113,12 +123,14 @@ void WarmSaturationProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     float outputVal = apvts.getRawParameterValue ("output")->load();
     float mixVal    = apvts.getRawParameterValue ("mix")->load() / 100.0f;
     float toneVal   = apvts.getRawParameterValue ("tone")->load();
+    float noiseVal  = apvts.getRawParameterValue ("noise")->load() / 100.0f;
 
     // Update DSP parameters
     saturation.setDrive (driveVal);
     saturation.setOutput (outputVal);
     saturation.setMix (mixVal);
     saturation.setTone (toneVal);
+    saturation.setNoise (noiseVal);
 
     // Process audio
     saturation.process (buffer);
