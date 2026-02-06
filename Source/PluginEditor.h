@@ -41,13 +41,17 @@ private:
     juce::Slider noiseKnob;
     juce::Slider noiseHPKnob;
 
-    // Labels
+    // Knob labels
     juce::Label driveLabel;
     juce::Label outputLabel;
     juce::Label mixLabel;
     juce::Label toneLabel;
     juce::Label noiseLabel;
     juce::Label noiseHPLabel;
+
+    // Section labels
+    juce::Label outputSectionLabel;
+    juce::Label noiseSectionLabel;
 
     // Parameter attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttachment;
